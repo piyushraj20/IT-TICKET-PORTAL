@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "633b1eaa-5395-4b16-9d08-84e937fb537e",
+  "alias": "ItTicketPortalWebPart",
+  "componentType": "WebPart",
+
+  
+  "version": "*",
+  "manifestVersion": 2,
+
+  
+  "requiresCustomScript": false,
+  "supportedHosts": ["SharePointWebPart", "TeamsPersonalApp", "TeamsTab", "SharePointFullPage"],
+  "supportsThemeVariants": true,
+
+  "preconfiguredEntries": [{
+    "groupId": "5c03119e-3074-46fd-976b-c60198311f70",
+    "group": { "default": "Advanced" },
+    "title": { "default": "ItTicketPortal" },
+    "description": { "default": "ItTicketPortal description" },
+    "officeFabricIconFontName": "Page",
+    "properties": {
+  "ticketsList": "ITTickets",
+  "commentsList": "TicketComments",
+  "historyList": "TicketHistory",
+  "supportGroupName": "IT Support Team"
+}
+    
+  }]
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "it-ticket-portal-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/itTicketPortal/ItTicketPortalWebPart.js",
+          "manifest": "./src/webparts/itTicketPortal/ItTicketPortalWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "ItTicketPortalWebPartStrings": "lib/webparts/itTicketPortal/loc/{locale}.js"
+  }
+}
