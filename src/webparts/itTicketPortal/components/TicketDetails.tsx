@@ -9,6 +9,7 @@
 // =====================================================================
 
 import * as React from 'react';
+import { Icon } from '@fluentui/react';
 import styles from './TicketPortal.module.scss';
 import { PriorityChip, StatusChip, formatDate } from './Chips';
 import { TicketService } from '../services/TicketService';
@@ -25,6 +26,7 @@ export interface ITicketDetailsProps {
   siteUrl: string;
   onBack: () => void;
   onChanged: () => void;   // tells the parent to refresh the list
+  onDeleted: () => Promise<void>;
 }
 
 const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
@@ -34,26 +36,40 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
   const [comments, setComments] = React.useState<IComment[]>([]);
   const [history, setHistory] = React.useState<IHistoryEntry[]>([]);
   const [attachments, setAttachments] = React.useState<IAttachment[]>([]);
+  const [assignableUsers, setAssignableUsers] = React.useState<ICurrentUser[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
   const [newComment, setNewComment] = React.useState('');
   const [nextStatus, setNextStatus] = React.useState<TicketStatus | ''>('');
+  const [selectedAgentId, setSelectedAgentId] = React.useState('');
+  const [ticketIdCopied, setTicketIdCopied] = React.useState(false);
 
   const load = React.useCallback(async (): Promise<void> => {
     setLoading(true);
     setError('');
     try {
-      const [t, c, h, a] = await Promise.all([
+      const [t, c, h, a, users] = await Promise.all([
         service.getTicketById(ticketId),
         service.getComments(ticketId),
         service.getHistory(ticketId),
-        service.getAttachments(ticketId)
+        service.getAttachments(ticketId),
+        service.getAssignableUsers()
       ]);
       setTicket(t);
       setComments(c);
-      setHistory(h);
+      setHistory(h.length > 0 ? h : [{
+        Id: 0,
+        TicketItemId: t.Id,
+        FromStatus: '',
+        ToStatus: t.TicketStatus,
+        Note: 'Current ticket status',
+        AuthorName: t.EmployeeName,
+        Created: t.Created
+      }]);
       setAttachments(a);
+      setAssignableUsers(users);
+      setSelectedAgentId(t.AssignedToId ? String(t.AssignedToId) : '');
       setNextStatus('');
     } catch (e) {
       setError(`Could not load this ticket. ${(e as Error).message}`);
@@ -83,7 +99,10 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
       setNewComment('');
       setComments(await service.getComments(ticketId));
     } catch (e) {
-      setError(`Comment not saved. ${(e as Error).message}`);
+      setError(
+        `Comment not saved. Make sure the ${'TicketComments'} list exists and you have permission to add items. ` +
+        `${(e as Error).message}`
+      );
     } finally {
       setBusy(false);
     }
@@ -109,15 +128,54 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
     }
   };
 
-  const handleAssignToMe = async (): Promise<void> => {
+  const handleAssign = async (): Promise<void> => {
+    if (!selectedAgentId) { return; }
     setBusy(true);
     try {
-      await service.assignTo(ticketId, currentUser.Id);
+      await service.assignTo(ticketId, Number(selectedAgentId));
       await load();
       props.onChanged();
     } catch (e) {
       setError(`Assignment failed. ${(e as Error).message}`);
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyTicketId = async (): Promise<void> => {
+    if (!ticket) { return; }
+    try {
+      const ticketId = ticket.TicketID;
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(ticketId);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = ticketId;
+        textArea.setAttribute('readonly', '');
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!copied) { throw new Error('Copy command failed'); }
+      }
+      setTicketIdCopied(true);
+      window.setTimeout(() => setTicketIdCopied(false), 1800);
+    } catch {
+      setError('Ticket ID could not be copied. Select it manually instead.');
+    }
+  };
+
+  const handleDelete = async (): Promise<void> => {
+    if (!ticket || !window.confirm(`Delete ticket ${ticket.TicketID}? This cannot be undone.`)) { return; }
+    setBusy(true);
+    setError('');
+    try {
+      await service.deleteTicket(ticket.Id);
+      await props.onDeleted();
+    } catch (e) {
+      setError(`Ticket not deleted. ${(e as Error).message}`);
       setBusy(false);
     }
   };
@@ -134,11 +192,20 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
   }
 
   const statusOptions = allowedStatuses();
+  const assignedAgentIndex = assignableUsers.findIndex(user => user.Id === ticket.AssignedToId);
+  const assignedAgentLabel = assignedAgentIndex >= 0
+    ? `Agent ${assignedAgentIndex + 1}`
+    : ticket.AssignedToName || 'Unassigned';
 
   return (
     <div>
       <div className={styles.actions} style={{ marginBottom: 14 }}>
         <button type="button" className={styles.button} onClick={props.onBack}>Back to list</button>
+        {isSupport && (
+          <button type="button" className={styles.button} onClick={handleDelete} disabled={busy}>
+            Delete ticket
+          </button>
+        )}
       </div>
 
       {error && <div className={`${styles.banner} ${styles.bannerError}`}>{error}</div>}
@@ -151,6 +218,15 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
             <h3 className={styles.panelTitle}>Ticket information</h3>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
               <span className={styles.ticketId}>{ticket.TicketID}</span>
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={copyTicketId}
+                title={ticketIdCopied ? 'Ticket ID copied' : 'Copy ticket ID'}
+                aria-label={ticketIdCopied ? 'Ticket ID copied' : 'Copy ticket ID'}
+              >
+                <Icon iconName={ticketIdCopied ? 'CheckMark' : 'Copy'} aria-hidden="true" />
+              </button>
               <PriorityChip value={ticket.Priority} />
               <StatusChip value={ticket.TicketStatus} />
             </div>
@@ -176,7 +252,7 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
               </div>
               <div>
                 <span className={styles.metaLabel}>Assigned to</span>
-                <span className={styles.metaValue}>{ticket.AssignedToName || 'Unassigned'}</span>
+                <span className={styles.metaValue}>{assignedAgentLabel}</span>
               </div>
             </div>
 
@@ -286,17 +362,33 @@ const TicketDetails: React.FC<ITicketDetailsProps> = (props) => {
                 </>
               )}
 
-              {isSupport && ticket.AssignedToId !== currentUser.Id && (
-                <div className={styles.actions}>
-                  <button
-                    type="button"
-                    className={styles.button}
-                    onClick={handleAssignToMe}
-                    disabled={busy}
-                  >
-                    Assign to me
-                  </button>
-                </div>
+              {isSupport && (
+                <>
+                  <div className={styles.field}>
+                    <label className={styles.label} htmlFor="tp-assigned-agent">Assigned to agent</label>
+                    <select
+                      id="tp-assigned-agent"
+                      className={styles.select}
+                      value={selectedAgentId}
+                      onChange={event => setSelectedAgentId(event.target.value)}
+                    >
+                      <option value="">Choose an agent</option>
+                      {assignableUsers.map((user, index) => (
+                        <option key={user.Id} value={user.Id}>Agent {index + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      className={styles.button}
+                      onClick={handleAssign}
+                      disabled={busy || !selectedAgentId || Number(selectedAgentId) === ticket.AssignedToId}
+                    >
+                      Assign ticket
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           )}

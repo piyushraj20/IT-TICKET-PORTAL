@@ -19,7 +19,6 @@ const Dashboard: React.FC<IDashboardProps> = ({ tickets, activeStatus, onSelectS
 
   const countBy = (status: TicketStatus): number =>
     tickets.filter(t => t.TicketStatus === status).length;
-
   const cards = [
     { key: '' as const, label: 'Total tickets', value: tickets.length, cls: styles.cardTotal },
     { key: 'Open' as const, label: 'Open', value: countBy('Open'), cls: styles.cardOpen },

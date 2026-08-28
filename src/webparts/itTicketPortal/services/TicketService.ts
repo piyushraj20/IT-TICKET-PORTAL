@@ -10,6 +10,7 @@ import '@pnp/sp/webs';
 import '@pnp/sp/lists';
 import '@pnp/sp/items';
 import '@pnp/sp/attachments';
+import '@pnp/sp/fields';
 import '@pnp/sp/site-users/web';
 import '@pnp/sp/site-groups/web';
 import {
@@ -106,6 +107,19 @@ export class TicketService {
     return this.toTicket(raw);
   }
 
+  public async getTicketByTicketId(ticketId: string): Promise<ITicket> {
+    const raw: any[] = await this.sp.web.lists.getByTitle(this.ticketsList).items
+      .select(...TICKET_SELECT)
+      .expand(...TICKET_EXPAND)
+      .filter(`TicketID eq '${esc(ticketId.trim())}'`)
+      .top(1)();
+
+    if (raw.length === 0) {
+      throw new Error('No ticket was found with that ticket ID.');
+    }
+    return this.toTicket(raw[0]);
+  }
+
   public async getComments(ticketItemId: number): Promise<IComment[]> {
     try {
       const raw: any[] = await this.sp.web.lists.getByTitle(this.commentsList).items
@@ -151,9 +165,13 @@ export class TicketService {
   }
 
   public async getAttachments(ticketItemId: number): Promise<IAttachment[]> {
-    const files: any[] = await this.sp.web.lists.getByTitle(this.ticketsList).items
-      .getById(ticketItemId).attachmentFiles();
-    return files.map(f => ({ FileName: f.FileName, ServerRelativeUrl: f.ServerRelativeUrl }));
+    try {
+      const files: any[] = await this.sp.web.lists.getByTitle(this.ticketsList).items
+        .getById(ticketItemId).attachmentFiles();
+      return files.map(f => ({ FileName: f.FileName, ServerRelativeUrl: f.ServerRelativeUrl }));
+    } catch {
+      return [];
+    }
   }
 
   // -------------------------------------------------------------------
@@ -213,6 +231,11 @@ export class TicketService {
       .getById(ticketItemId).update({ AssignedToId: userId });
   }
 
+  public async deleteTicket(ticketItemId: number): Promise<void> {
+    await this.sp.web.lists.getByTitle(this.ticketsList).items
+      .getById(ticketItemId).recycle();
+  }
+
   public async addComment(ticketItemId: number, text: string): Promise<void> {
     await this.sp.web.lists.getByTitle(this.commentsList).items.add({
       Title: `Comment on ${ticketItemId}`,
@@ -244,6 +267,37 @@ export class TicketService {
   public async getCurrentUser(): Promise<ICurrentUser> {
     const user: any = await this.sp.web.currentUser();
     return { Id: user.Id, Title: user.Title, Email: user.Email };
+  }
+
+  public async getAssignableUsers(): Promise<ICurrentUser[]> {
+    try {
+      const users: any[] = await this.sp.web.siteUsers
+        .select('Id', 'Title', 'Email')
+        .top(5)();
+      return users.map(user => ({ Id: user.Id, Title: user.Title, Email: user.Email }));
+    } catch {
+      return [];
+    }
+  }
+
+  public async ensureSupportLists(): Promise<void> {
+    try {
+      const comments = await this.sp.web.lists.ensure(this.commentsList, '100');
+      await comments.list.fields.addNumber('TicketItemId');
+      await comments.list.fields.addMultilineText('CommentText');
+    } catch {
+      // Existing lists or users without list-management permission are handled below.
+    }
+
+    try {
+      const history = await this.sp.web.lists.ensure(this.historyList, '100');
+      await history.list.fields.addNumber('TicketItemId');
+      await history.list.fields.addText('FromStatus');
+      await history.list.fields.addText('ToStatus');
+      await history.list.fields.addMultilineText('Note');
+    } catch {
+      // History is optional; the ticket itself must remain usable.
+    }
   }
 
   /** True when the signed-in user belongs to the SharePoint group given. */
